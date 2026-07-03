@@ -46,6 +46,7 @@ var typeEmoji = map[string]string{
 	"firmware":       "🧬",
 	"block":          "🎉🧱",
 	"record":         "💎",
+	"session_record": "🔥",
 	"lowhash":        "📉",
 	"temp":           "🌡️",
 	"vrtemp":         "🌡️",

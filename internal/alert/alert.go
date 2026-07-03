@@ -143,6 +143,30 @@ func (e *Engine) Device(miner string, i *bitaxe.SystemInfo, st *state.MinerState
 		st.AllTimeBestDiff = i.BestDiff
 	}
 
+	// --- New session (best-this-uptime) record ---
+	// Gated to a fraction of all-time so the post-reboot climb stays quiet, and
+	// skipped when it's also an all-time record (that alert already fired).
+	if e.th.SessionRecordPct > 0 && st.AllTimeBestDiff > 0 {
+		switch {
+		case i.BestSessionDiff < st.BestSessionDiff:
+			st.BestSessionDiff = i.BestSessionDiff // session reset (reboot)
+		case i.BestSessionDiff > st.BestSessionDiff:
+			floor := st.AllTimeBestDiff * e.th.SessionRecordPct / 100
+			if i.BestSessionDiff >= floor && i.BestSessionDiff < st.AllTimeBestDiff {
+				add(Alert{
+					Type: "session_record", Severity: Celebrate, Title: "New session best",
+					Text: fmt.Sprintf("%s set a new best-this-uptime share.", miner),
+					Fields: []Field{
+						{"Session best", format.Diff(i.BestSessionDiff)},
+						{"All-time", format.Diff(st.AllTimeBestDiff)},
+						{"vs all-time", fmt.Sprintf("%.0f%%", 100*i.BestSessionDiff/st.AllTimeBestDiff)},
+					},
+				})
+			}
+			st.BestSessionDiff = i.BestSessionDiff
+		}
+	}
+
 	// --- Low hashrate / work stoppage (sustained) ---
 	floor := i.ExpectedHashrate * e.th.HashrateFloorPct / 100
 	low := i.ExpectedHashrate > 0 && i.HashRate1m < floor

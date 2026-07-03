@@ -96,6 +96,36 @@ func TestLowHashSustained(t *testing.T) {
 	}
 }
 
+func TestSessionRecord(t *testing.T) {
+	e := New(config.Thresholds{HashrateFloorPct: 50, WorkStoppageMin: 5, PoolSilenceMin: 15, SessionRecordPct: 50})
+	st := newState()
+	st.AllTimeBestDiff = 1e9 // floor = 500M
+	now := time.Unix(1_700_000_000, 0)
+
+	mk := func(sess float64) *bitaxe.SystemInfo {
+		return &bitaxe.SystemInfo{BestDiff: 1e9, BestSessionDiff: sess, ExpectedHashrate: 1000,
+			HashRate1m: 1000, HashRate: 1000, FanRPM: 8000, AxeOSVersion: "v", UptimeSeconds: 1000}
+	}
+
+	// Below the 50%-of-all-time floor: quiet (post-reboot climb).
+	if a := e.Device("m", mk(4e8), st, now); find(a, "session_record") != nil {
+		t.Fatalf("should not alert below floor, got %v", a)
+	}
+	// New session high above the floor, below all-time: fires.
+	if a := e.Device("m", mk(6e8), st, now); find(a, "session_record") == nil {
+		t.Fatalf("expected session_record above floor, got %v", a)
+	}
+	// Session diff drops (reboot): treated as reset, no alert.
+	if a := e.Device("m", mk(1e8), st, now); find(a, "session_record") != nil {
+		t.Fatalf("session reset should not alert, got %v", a)
+	}
+	// A session best that also beats all-time is left to the all-time record alert.
+	a := e.Device("m", mk(2e9), st, now)
+	if find(a, "session_record") != nil {
+		t.Errorf("session_record should not fire when it beats all-time, got %v", a)
+	}
+}
+
 func TestPoolSilenceAndRecord(t *testing.T) {
 	e, st := testEngine(), newState()
 	st.AllTimeBestDiff = 1e9

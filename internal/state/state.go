@@ -15,6 +15,7 @@ import (
 type MinerState struct {
 	LastUptime      int64           `json:"last_uptime"`
 	AllTimeBestDiff float64         `json:"all_time_best_diff"`
+	BestSessionDiff float64         `json:"best_session_diff"` // peak session diff seen; resets when the miner reboots
 	LastFirmware    string          `json:"last_firmware"`
 	LastAccepted    int64           `json:"last_accepted"`
 	LastRejected    int64           `json:"last_rejected"`

@@ -23,6 +23,7 @@ once (as an ℹ️ recovery) when it clears. A standing condition never re-notif
 | Device | Firmware version changed |
 | Device | 🎉 Block found (`blockFound` flag, or best diff ≥ network diff) |
 | Device | New record difficulty (all-time best share) |
+| Device | New session best (best-this-uptime, gated to a % of all-time) |
 | Device | Hashrate collapse / work stoppage (sustained) + recovery |
 | Device | ASIC over-temperature + recovery |
 | Device | VR (regulator) over-temperature + recovery |

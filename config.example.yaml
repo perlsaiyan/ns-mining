@@ -23,3 +23,4 @@ thresholds:
   hashrate_floor_pct: 50    # alert if sustained hashrate < this % of expected
   work_stoppage_min: 5      # minutes of ~zero hashrate before "work stopped"
   pool_silence_min: 15      # minutes since pool last saw a share before alert
+  session_record_pct: 50    # new best-this-uptime share alerts once it reaches this % of all-time best (negative disables)

@@ -62,6 +62,7 @@ type Thresholds struct {
 	HashrateFloorPct float64 `yaml:"hashrate_floor_pct"` // % of expectedHashrate
 	WorkStoppageMin  int     `yaml:"work_stoppage_min"`
 	PoolSilenceMin   int     `yaml:"pool_silence_min"`
+	SessionRecordPct float64 `yaml:"session_record_pct"` // new session best ≥ this % of all-time best fires; unset→50, negative disables
 }
 
 // Load reads, parses, defaults, and validates the config at path.
@@ -106,6 +107,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Thresholds.PoolSilenceMin == 0 {
 		c.Thresholds.PoolSilenceMin = 15
+	}
+	if c.Thresholds.SessionRecordPct == 0 {
+		c.Thresholds.SessionRecordPct = 50
 	}
 }
 
