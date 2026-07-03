@@ -34,19 +34,19 @@ func TestReachableEdge(t *testing.T) {
 	e, st := testEngine(), newState()
 
 	// First reading up: no alert (was not offline).
-	if a := e.Reachable("m", st, true, nil); len(a) != 0 {
+	if a := e.StepReachable("m", st, true, nil); len(a) != 0 {
 		t.Fatalf("initial up should not alert, got %v", a)
 	}
 	// Goes down: one offline alert.
-	if a := e.Reachable("m", st, false, errors.New("timeout")); find(a, "offline") == nil {
+	if a := e.StepReachable("m", st, false, errors.New("timeout")); find(a, "offline") == nil {
 		t.Fatalf("expected offline alert, got %v", a)
 	}
 	// Still down: no repeat.
-	if a := e.Reachable("m", st, false, errors.New("timeout")); len(a) != 0 {
+	if a := e.StepReachable("m", st, false, errors.New("timeout")); len(a) != 0 {
 		t.Fatalf("offline should not re-fire, got %v", a)
 	}
 	// Recovers: one recovery alert.
-	if a := e.Reachable("m", st, true, nil); find(a, "offline") == nil {
+	if a := e.StepReachable("m", st, true, nil); find(a, "offline") == nil {
 		t.Fatalf("expected recovery alert, got %v", a)
 	}
 }
@@ -57,13 +57,13 @@ func TestRebootAndRecord(t *testing.T) {
 
 	// Establish baseline: uptime 1000, bestDiff 1e9. No alerts on first sight.
 	base := &bitaxe.SystemInfo{UptimeSeconds: 1000, BestDiff: 1e9, AxeOSVersion: "v2.13.1", ExpectedHashrate: 1275, HashRate1m: 1275, HashRate: 1275, FanRPM: 8000}
-	if a := e.Device("m", base, st, now); len(a) != 0 {
+	if a := e.StepDevice("m", base, st, now); len(a) != 0 {
 		t.Fatalf("first sight should not alert, got %v", a)
 	}
 
 	// Uptime drops (reboot) and new record diff.
 	next := &bitaxe.SystemInfo{UptimeSeconds: 30, BestDiff: 2e9, AxeOSVersion: "v2.13.1", ResetReason: "power-on", ExpectedHashrate: 1275, HashRate1m: 1275, HashRate: 1275, FanRPM: 8000}
-	a := e.Device("m", next, st, now)
+	a := e.StepDevice("m", next, st, now)
 	if find(a, "reboot") == nil {
 		t.Errorf("expected reboot alert, got %v", a)
 	}
@@ -81,17 +81,17 @@ func TestLowHashSustained(t *testing.T) {
 	low := &bitaxe.SystemInfo{ExpectedHashrate: 1000, HashRate1m: 100, HashRate: 100, UptimeSeconds: 5000, AxeOSVersion: "v"}
 
 	// Below floor but not yet sustained: no alert.
-	if a := e.Device("m", low, st, start); find(a, "lowhash") != nil {
+	if a := e.StepDevice("m", low, st, start); find(a, "lowhash") != nil {
 		t.Fatalf("should not alert before sustained window, got %v", a)
 	}
 	// After the window: fires once.
-	a := e.Device("m", low, st, start.Add(6*time.Minute))
+	a := e.StepDevice("m", low, st, start.Add(6*time.Minute))
 	if find(a, "lowhash") == nil {
 		t.Fatalf("expected lowhash alert after window, got %v", a)
 	}
 	// Recovery when hashrate returns.
 	ok := &bitaxe.SystemInfo{ExpectedHashrate: 1000, HashRate1m: 1000, HashRate: 1000, UptimeSeconds: 5100, AxeOSVersion: "v"}
-	if r := e.Device("m", ok, st, start.Add(7*time.Minute)); find(r, "lowhash") == nil {
+	if r := e.StepDevice("m", ok, st, start.Add(7*time.Minute)); find(r, "lowhash") == nil {
 		t.Fatalf("expected lowhash recovery, got %v", r)
 	}
 }
@@ -108,19 +108,19 @@ func TestSessionRecord(t *testing.T) {
 	}
 
 	// Below the 50%-of-all-time floor: quiet (post-reboot climb).
-	if a := e.Device("m", mk(4e8), st, now); find(a, "session_record") != nil {
+	if a := e.StepDevice("m", mk(4e8), st, now); find(a, "session_record") != nil {
 		t.Fatalf("should not alert below floor, got %v", a)
 	}
 	// New session high above the floor, below all-time: fires.
-	if a := e.Device("m", mk(6e8), st, now); find(a, "session_record") == nil {
+	if a := e.StepDevice("m", mk(6e8), st, now); find(a, "session_record") == nil {
 		t.Fatalf("expected session_record above floor, got %v", a)
 	}
 	// Session diff drops (reboot): treated as reset, no alert.
-	if a := e.Device("m", mk(1e8), st, now); find(a, "session_record") != nil {
+	if a := e.StepDevice("m", mk(1e8), st, now); find(a, "session_record") != nil {
 		t.Fatalf("session reset should not alert, got %v", a)
 	}
 	// A session best that also beats all-time is left to the all-time record alert.
-	a := e.Device("m", mk(2e9), st, now)
+	a := e.StepDevice("m", mk(2e9), st, now)
 	if find(a, "session_record") != nil {
 		t.Errorf("session_record should not fire when it beats all-time, got %v", a)
 	}
@@ -133,7 +133,7 @@ func TestPoolSilenceAndRecord(t *testing.T) {
 
 	// Last share 20 min ago (> 15m threshold) and a new pool-side record.
 	s := &ckpool.Stats{LastShare: now.Add(-20 * time.Minute).Unix(), Workers: 1, BestEver: 2e9}
-	a := e.Pool("m", s, st, now)
+	a := e.StepPool("m", s, st, now)
 	if find(a, "pool_silence") == nil {
 		t.Errorf("expected pool_silence alert, got %v", a)
 	}
@@ -143,7 +143,7 @@ func TestPoolSilenceAndRecord(t *testing.T) {
 
 	// Shares resume, workers present: silence recovers, no new record.
 	s2 := &ckpool.Stats{LastShare: now.Unix(), Workers: 1, BestEver: 2e9}
-	r := e.Pool("m", s2, st, now)
+	r := e.StepPool("m", s2, st, now)
 	if rec := find(r, "pool_silence"); rec == nil || rec.Severity != Info {
 		t.Errorf("expected pool_silence recovery (info), got %v", r)
 	}

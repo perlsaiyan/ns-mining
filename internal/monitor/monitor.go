@@ -198,10 +198,10 @@ func (m *Monitor) pollDevice(ctx context.Context, miner config.Miner, now time.T
 
 	info, err := m.bitaxe[miner.Name].SystemInfo(rctx)
 	if err != nil {
-		return m.engine.Reachable(miner.Name, st, false, err)
+		return m.engine.StepReachable(miner.Name, st, false, err)
 	}
-	alerts := m.engine.Reachable(miner.Name, st, true, nil)
-	return append(alerts, m.engine.Device(miner.Name, info, st, now)...)
+	alerts := m.engine.StepReachable(miner.Name, st, true, nil)
+	return append(alerts, m.engine.StepDevice(miner.Name, info, st, now)...)
 }
 
 func (m *Monitor) pollPool(ctx context.Context, miner config.Miner, now time.Time) []alert.Alert {
@@ -214,7 +214,7 @@ func (m *Monitor) pollPool(ctx context.Context, miner config.Miner, now time.Tim
 		log.Printf("pool poll %s: %v", miner.Name, err)
 		return nil
 	}
-	return m.engine.Pool(miner.Name, stats, st, now)
+	return m.engine.StepPool(miner.Name, stats, st, now)
 }
 
 func (m *Monitor) dispatch(ctx context.Context, a alert.Alert) {

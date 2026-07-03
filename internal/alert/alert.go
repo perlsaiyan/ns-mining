@@ -64,10 +64,10 @@ type Engine struct {
 // New returns an engine bound to the given thresholds.
 func New(th config.Thresholds) *Engine { return &Engine{th: th} }
 
-// Reachable manages the offline/online edge for a miner and returns any alert
-// produced by the transition (offline when it goes unreachable, recovered when
-// it comes back).
-func (e *Engine) Reachable(miner string, st *state.MinerState, up bool, cause error) []Alert {
+// StepReachable advances a miner's offline/online edge, mutating st, and returns
+// any alert produced by the transition (offline when it goes unreachable,
+// recovered when it comes back).
+func (e *Engine) StepReachable(miner string, st *state.MinerState, up bool, cause error) []Alert {
 	rising, falling := st.Edge("offline", !up)
 	switch {
 	case rising:
@@ -86,10 +86,10 @@ func (e *Engine) Reachable(miner string, st *state.MinerState, up bool, cause er
 	return nil
 }
 
-// Device evaluates a fresh AxeOS reading against stored state, appending alerts
-// and mutating st (records, last-seen counters, active conditions). now is
-// passed in for testability.
-func (e *Engine) Device(miner string, i *bitaxe.SystemInfo, st *state.MinerState, now time.Time) []Alert {
+// StepDevice advances a miner's state with a fresh AxeOS reading: it mutates st
+// (records, last-seen counters, active conditions) and returns the alerts that
+// transition produced. now is passed in for testability.
+func (e *Engine) StepDevice(miner string, i *bitaxe.SystemInfo, st *state.MinerState, now time.Time) []Alert {
 	var out []Alert
 	add := func(a Alert) { a.Miner = miner; out = append(out, a) }
 
@@ -234,10 +234,10 @@ func (e *Engine) Device(miner string, i *bitaxe.SystemInfo, st *state.MinerState
 	return out
 }
 
-// Pool evaluates a solo.ckpool.org reading against stored state. It shares
-// st.AllTimeBestDiff with Device so a record is reported once regardless of
-// which source observes it first.
-func (e *Engine) Pool(miner string, s *ckpool.Stats, st *state.MinerState, now time.Time) []Alert {
+// StepPool advances a miner's state with a solo.ckpool.org reading, mutating st.
+// It shares st.AllTimeBestDiff with StepDevice so a record is reported once
+// regardless of which source observes it first.
+func (e *Engine) StepPool(miner string, s *ckpool.Stats, st *state.MinerState, now time.Time) []Alert {
 	var out []Alert
 	add := func(a Alert) { a.Miner = miner; out = append(out, a) }
 
