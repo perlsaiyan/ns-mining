@@ -1,0 +1,24 @@
+# ns-mining configuration.
+# Copy to config.yaml and edit. The Slack bot token is NOT set here — it is
+# read from the $SLACK_BOT_TOKEN environment variable.
+
+device_poll_interval: 20s   # how often to query each Bitaxe's AxeOS API
+pool_poll_interval: 60s     # how often to query the pool (solo.ckpool.org)
+state_file: /var/lib/ns-mining/state.json
+
+slack:
+  channel: C0BEQ56HM0B      # channel ID (preferred) or #channel-name
+
+miners:
+  - name: bitaxe1
+    url: http://192.168.88.152
+    pool:
+      type: ckpool
+      address: bc1q52c2qzn7363nn6esg8wvcur3leqszjz9ete5cc
+
+thresholds:
+  temp_warn_c: 68           # ASIC temp warning
+  vr_temp_warn_c: 95        # voltage-regulator temp warning
+  hashrate_floor_pct: 50    # alert if sustained hashrate < this % of expected
+  work_stoppage_min: 5      # minutes of ~zero hashrate before "work stopped"
+  pool_silence_min: 15      # minutes since pool last saw a share before alert

@@ -1,0 +1,10 @@
+# compiled binary
+/ns-mining
+
+# local runtime config & secrets (never commit)
+/config.yaml
+.env.local
+.env
+
+# local state
+*.state.json

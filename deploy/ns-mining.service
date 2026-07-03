@@ -1,0 +1,23 @@
+[Unit]
+Description=ns-mining — Bitaxe monitor & Slack notifier
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# System-service install: create a dedicated user and point these at the
+# installed binary/config. For a --user install, see README.
+ExecStart=/usr/local/bin/ns-mining -config /etc/ns-mining/config.yaml
+EnvironmentFile=/etc/ns-mining/env      # must contain SLACK_BOT_TOKEN=xoxb-...
+Restart=always
+RestartSec=5
+# systemd creates and owns /var/lib/ns-mining for the state file.
+StateDirectory=ns-mining
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

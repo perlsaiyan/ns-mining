@@ -1,0 +1,247 @@
+// Package alert evaluates miner telemetry into notification-worthy events.
+//
+// Rules are edge-triggered: a condition firing produces exactly one alert, and
+// its clearing produces exactly one recovery, using the persisted per-miner
+// Active map. This keeps a persistent condition (e.g. an overheating device)
+// from re-notifying every poll.
+package alert
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/perlsaiyan/ns-mining/internal/bitaxe"
+	"github.com/perlsaiyan/ns-mining/internal/ckpool"
+	"github.com/perlsaiyan/ns-mining/internal/config"
+	"github.com/perlsaiyan/ns-mining/internal/format"
+	"github.com/perlsaiyan/ns-mining/internal/state"
+)
+
+// Severity controls the emoji/colour a notifier renders.
+type Severity int
+
+const (
+	Info Severity = iota
+	Warning
+	Critical
+	Celebrate
+)
+
+func (s Severity) String() string {
+	switch s {
+	case Warning:
+		return "warning"
+	case Critical:
+		return "critical"
+	case Celebrate:
+		return "celebrate"
+	default:
+		return "info"
+	}
+}
+
+// Alert is one notification-worthy event.
+type Alert struct {
+	Miner    string
+	Type     string
+	Severity Severity
+	Title    string
+	Text     string
+}
+
+// Engine turns telemetry deltas into alerts using configured thresholds.
+type Engine struct {
+	th config.Thresholds
+}
+
+// New returns an engine bound to the given thresholds.
+func New(th config.Thresholds) *Engine { return &Engine{th: th} }
+
+// Reachable manages the offline/online edge for a miner and returns any alert
+// produced by the transition (offline when it goes unreachable, recovered when
+// it comes back).
+func (e *Engine) Reachable(miner string, st *state.MinerState, up bool, cause error) []Alert {
+	rising, falling := st.Edge("offline", !up)
+	switch {
+	case rising:
+		return []Alert{{
+			Miner: miner, Type: "offline", Severity: Critical,
+			Title: "Miner offline",
+			Text:  fmt.Sprintf("%s is unreachable: %v", miner, cause),
+		}}
+	case falling:
+		return []Alert{{
+			Miner: miner, Type: "offline", Severity: Info,
+			Title: "Miner back online",
+			Text:  fmt.Sprintf("%s is reachable again", miner),
+		}}
+	}
+	return nil
+}
+
+// Device evaluates a fresh AxeOS reading against stored state, appending alerts
+// and mutating st (records, last-seen counters, active conditions). now is
+// passed in for testability.
+func (e *Engine) Device(miner string, i *bitaxe.SystemInfo, st *state.MinerState, now time.Time) []Alert {
+	var out []Alert
+	add := func(a Alert) { a.Miner = miner; out = append(out, a) }
+
+	// --- Reboot: uptime went backwards ---
+	if st.LastUptime > 0 && i.UptimeSeconds < st.LastUptime {
+		add(Alert{
+			Type: "reboot", Severity: Warning, Title: "Miner rebooted",
+			Text: fmt.Sprintf("%s restarted (uptime %s, reset reason: %q)",
+				miner, format.Uptime(i.UptimeSeconds), i.ResetReason),
+		})
+	}
+	st.LastUptime = i.UptimeSeconds
+
+	// --- Firmware version change ---
+	if st.LastFirmware != "" && st.LastFirmware != i.AxeOSVersion {
+		add(Alert{
+			Type: "firmware", Severity: Info, Title: "Firmware changed",
+			Text: fmt.Sprintf("%s firmware %s → %s", miner, st.LastFirmware, i.AxeOSVersion),
+		})
+	}
+	st.LastFirmware = i.AxeOSVersion
+
+	// --- Block found (the big one) ---
+	blockCond := i.BlockFound != 0 || (i.NetworkDifficulty > 0 && i.BestDiff >= i.NetworkDifficulty)
+	if rising, _ := st.Edge("block", blockCond); rising {
+		add(Alert{
+			Type: "block", Severity: Celebrate, Title: "🎉 BLOCK FOUND",
+			Text: fmt.Sprintf("%s may have solved block %d! best diff %s vs network %s",
+				miner, i.BlockHeight, format.Diff(i.BestDiff), format.Diff(i.NetworkDifficulty)),
+		})
+	}
+
+	// --- New all-time record difficulty ---
+	if st.AllTimeBestDiff > 0 && i.BestDiff > st.AllTimeBestDiff {
+		add(Alert{
+			Type: "record", Severity: Celebrate, Title: "New record difficulty",
+			Text: fmt.Sprintf("%s new best share %s (was %s)",
+				miner, format.Diff(i.BestDiff), format.Diff(st.AllTimeBestDiff)),
+		})
+	}
+	if i.BestDiff > st.AllTimeBestDiff {
+		st.AllTimeBestDiff = i.BestDiff
+	}
+
+	// --- Low hashrate / work stoppage (sustained) ---
+	floor := i.ExpectedHashrate * e.th.HashrateFloorPct / 100
+	low := i.ExpectedHashrate > 0 && i.HashRate1m < floor
+	if low {
+		if st.LowHashSince.IsZero() {
+			st.LowHashSince = now
+		}
+		sustained := now.Sub(st.LowHashSince) >= time.Duration(e.th.WorkStoppageMin)*time.Minute
+		if rising, _ := st.Edge("lowhash", sustained); rising {
+			add(Alert{
+				Type: "lowhash", Severity: Critical, Title: "Hashrate collapsed",
+				Text: fmt.Sprintf("%s hashrate %s is below %.0f%% of expected %s for %d+ min",
+					miner, format.Hashrate(i.HashRate1m), e.th.HashrateFloorPct,
+					format.Hashrate(i.ExpectedHashrate), e.th.WorkStoppageMin),
+			})
+		}
+	} else {
+		st.LowHashSince = time.Time{}
+		if _, falling := st.Edge("lowhash", false); falling {
+			add(Alert{
+				Type: "lowhash", Severity: Info, Title: "Hashrate recovered",
+				Text: fmt.Sprintf("%s hashrate back to %s", miner, format.Hashrate(i.HashRate1m)),
+			})
+		}
+	}
+
+	// --- ASIC over-temperature ---
+	e.threshold(&out, miner, st, "temp", i.Temp >= e.th.TempWarnC || i.OverheatMode != 0,
+		fmt.Sprintf("ASIC temp %.1f°C (limit %.0f°C)", i.Temp, e.th.TempWarnC),
+		fmt.Sprintf("ASIC temp back to %.1f°C", i.Temp), Critical)
+
+	// --- VR (regulator) over-temperature ---
+	e.threshold(&out, miner, st, "vrtemp", i.VRTemp >= e.th.VRTempWarnC,
+		fmt.Sprintf("VR temp %.0f°C (limit %.0f°C)", i.VRTemp, e.th.VRTempWarnC),
+		fmt.Sprintf("VR temp back to %.0f°C", i.VRTemp), Critical)
+
+	// --- Fan failure: not spinning while hashing ---
+	e.threshold(&out, miner, st, "fan", i.FanRPM == 0 && i.HashRate > 0,
+		"primary fan reads 0 RPM while hashing",
+		fmt.Sprintf("fan spinning again (%d RPM)", i.FanRPM), Critical)
+
+	// --- Running on fallback stratum ---
+	e.threshold(&out, miner, st, "fallback", i.IsUsingFallbackStrat != 0,
+		"switched to fallback stratum (primary pool unreachable?)",
+		"back on primary stratum", Warning)
+
+	st.LastAccepted = i.SharesAccepted
+	st.LastRejected = i.SharesRejected
+	return out
+}
+
+// Pool evaluates a solo.ckpool.org reading against stored state. It shares
+// st.AllTimeBestDiff with Device so a record is reported once regardless of
+// which source observes it first.
+func (e *Engine) Pool(miner string, s *ckpool.Stats, st *state.MinerState, now time.Time) []Alert {
+	var out []Alert
+	add := func(a Alert) { a.Miner = miner; out = append(out, a) }
+
+	// --- Share silence: pool hasn't accepted a share in too long ---
+	if s.LastShare > 0 {
+		silent := now.Sub(time.Unix(s.LastShare, 0)) >= time.Duration(e.th.PoolSilenceMin)*time.Minute
+		rising, falling := st.Edge("pool_silence", silent)
+		if rising {
+			add(Alert{Type: "pool_silence", Severity: Critical, Title: "No shares reaching pool",
+				Text: fmt.Sprintf("%s: solo.ckpool.org last saw a share %s ago (threshold %dm)",
+					miner, now.Sub(time.Unix(s.LastShare, 0)).Round(time.Minute), e.th.PoolSilenceMin)})
+		} else if falling {
+			add(Alert{Type: "pool_silence", Severity: Info, Title: "Pool receiving shares again",
+				Text: fmt.Sprintf("%s: shares landing at the pool again", miner)})
+		}
+	}
+
+	// --- Worker disappeared from the pool ---
+	rising, falling := st.Edge("pool_noworkers", s.Workers == 0)
+	if rising {
+		add(Alert{Type: "pool_noworkers", Severity: Critical, Title: "No workers at pool",
+			Text: fmt.Sprintf("%s: pool reports 0 connected workers", miner)})
+	} else if falling {
+		add(Alert{Type: "pool_noworkers", Severity: Info, Title: "Worker reconnected",
+			Text: fmt.Sprintf("%s: pool reports %d worker(s)", miner, s.Workers)})
+	}
+
+	// --- All-time record (pool-side cross-check, shares state with Device) ---
+	if st.AllTimeBestDiff > 0 && s.BestEver > st.AllTimeBestDiff {
+		add(Alert{Type: "record", Severity: Celebrate, Title: "New record difficulty",
+			Text: fmt.Sprintf("%s new best share %s at pool (was %s)",
+				miner, format.Diff(s.BestEver), format.Diff(st.AllTimeBestDiff))})
+	}
+	if s.BestEver > st.AllTimeBestDiff {
+		st.AllTimeBestDiff = s.BestEver
+	}
+	return out
+}
+
+// threshold fires a warning/critical alert on rising and an info recovery on
+// falling, formatting titles consistently.
+func (e *Engine) threshold(out *[]Alert, miner string, st *state.MinerState, key string, cond bool, onText, offText string, sev Severity) {
+	rising, falling := st.Edge(key, cond)
+	if rising {
+		*out = append(*out, Alert{Miner: miner, Type: key, Severity: sev,
+			Title: title(key, true), Text: miner + ": " + onText})
+	} else if falling {
+		*out = append(*out, Alert{Miner: miner, Type: key, Severity: Info,
+			Title: title(key, false), Text: miner + ": " + offText})
+	}
+}
+
+func title(key string, on bool) string {
+	names := map[string]string{
+		"temp": "ASIC over-temp", "vrtemp": "VR over-temp",
+		"fan": "Fan failure", "fallback": "Fallback stratum",
+	}
+	n := names[key]
+	if !on {
+		return n + " cleared"
+	}
+	return n
+}
