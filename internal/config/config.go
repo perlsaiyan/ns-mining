@@ -28,6 +28,7 @@ func (d Duration) D() time.Duration { return time.Duration(d) }
 type Config struct {
 	DevicePollInterval Duration   `yaml:"device_poll_interval"`
 	PoolPollInterval   Duration   `yaml:"pool_poll_interval"`
+	HeartbeatTime      string     `yaml:"heartbeat_time"` // "HH:MM" local; empty disables
 	StateFile          string     `yaml:"state_file"`
 	Slack              Slack      `yaml:"slack"`
 	Miners             []Miner    `yaml:"miners"`
@@ -111,6 +112,11 @@ func (c *Config) applyDefaults() {
 func (c *Config) validate() error {
 	if len(c.Miners) == 0 {
 		return fmt.Errorf("config: no miners defined")
+	}
+	if c.HeartbeatTime != "" {
+		if _, err := time.Parse("15:04", c.HeartbeatTime); err != nil {
+			return fmt.Errorf("config: heartbeat_time %q must be HH:MM: %w", c.HeartbeatTime, err)
+		}
 	}
 	seen := map[string]bool{}
 	for i, m := range c.Miners {

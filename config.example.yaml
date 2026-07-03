@@ -4,6 +4,7 @@
 
 device_poll_interval: 20s   # how often to query each Bitaxe's AxeOS API
 pool_poll_interval: 60s     # how often to query the pool (solo.ckpool.org)
+heartbeat_time: "09:00"     # daily summary at this local time; "" to disable
 state_file: /var/lib/ns-mining/state.json
 
 slack:

@@ -26,6 +26,7 @@ func main() {
 
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
 	once := flag.Bool("once", false, "poll each miner once, print a summary, and exit")
+	heartbeat := flag.Bool("heartbeat", false, "post one heartbeat summary to Slack and exit")
 	flag.Parse()
 
 	cfg, err := config.Load(*cfgPath)
@@ -35,6 +36,13 @@ func main() {
 
 	if *once {
 		if err := runOnce(cfg); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
+	if *heartbeat {
+		if err := runHeartbeat(cfg); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -67,6 +75,24 @@ func run(cfg *config.Config) error {
 
 	log.Print("started")
 	return mon.Run(ctx)
+}
+
+// runHeartbeat posts a single summary to Slack and exits.
+func runHeartbeat(cfg *config.Config) error {
+	if cfg.Slack.Token == "" {
+		return fmt.Errorf("SLACK_BOT_TOKEN not set")
+	}
+	st, err := state.Load(cfg.StateFile)
+	if err != nil {
+		return fmt.Errorf("load state: %w", err)
+	}
+	notifier := notify.NewSlack(cfg.Slack.Token, cfg.Slack.Channel)
+	mon := monitor.New(cfg, st, alert.New(cfg.Thresholds), notifier)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	mon.Heartbeat(ctx)
+	return nil
 }
 
 // runOnce polls every miner a single time and prints a human-readable summary.

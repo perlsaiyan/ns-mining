@@ -3,7 +3,9 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/perlsaiyan/ns-mining/internal/bitaxe"
 	"github.com/perlsaiyan/ns-mining/internal/ckpool"
 	"github.com/perlsaiyan/ns-mining/internal/config"
+	"github.com/perlsaiyan/ns-mining/internal/format"
 	"github.com/perlsaiyan/ns-mining/internal/state"
 )
 
@@ -54,6 +57,17 @@ func (m *Monitor) Run(ctx context.Context) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	// Daily heartbeat schedule (validated as HH:MM by config.Load).
+	var hbHour, hbMin int
+	hbEnabled := m.cfg.HeartbeatTime != ""
+	var nextHB time.Time
+	if hbEnabled {
+		t, _ := time.Parse("15:04", m.cfg.HeartbeatTime)
+		hbHour, hbMin = t.Hour(), t.Minute()
+		nextHB = nextDaily(time.Now(), hbHour, hbMin)
+		log.Printf("daily heartbeat at %s (next %s)", m.cfg.HeartbeatTime, nextHB.Format(time.RFC1123))
+	}
+
 	m.tick(ctx, time.Now(), true) // first pass polls both
 	nextPool := time.Now().Add(m.cfg.PoolPollInterval.D())
 	for {
@@ -66,7 +80,66 @@ func (m *Monitor) Run(ctx context.Context) error {
 			if doPool {
 				nextPool = now.Add(m.cfg.PoolPollInterval.D())
 			}
+			if hbEnabled && !now.Before(nextHB) {
+				m.sendHeartbeat(ctx, now)
+				nextHB = nextDaily(now, hbHour, hbMin)
+			}
 		}
+	}
+}
+
+// Heartbeat sends a single daily-summary message immediately. Useful for a
+// manual "status now" and for testing.
+func (m *Monitor) Heartbeat(ctx context.Context) { m.sendHeartbeat(ctx, time.Now()) }
+
+// nextDaily returns the next occurrence of hh:mm strictly after now.
+func nextDaily(now time.Time, hh, mm int) time.Time {
+	t := time.Date(now.Year(), now.Month(), now.Day(), hh, mm, 0, 0, now.Location())
+	if !t.After(now) {
+		t = t.Add(24 * time.Hour)
+	}
+	return t
+}
+
+// sendHeartbeat posts a daily digest of every miner's current state. It polls
+// fresh so the summary is authoritative rather than reusing cached readings.
+func (m *Monitor) sendHeartbeat(ctx context.Context, now time.Time) {
+	if m.notifier == nil {
+		return
+	}
+	var b strings.Builder
+	b.WriteString(":bar_chart: *ns-mining daily summary*\n")
+
+	for _, mn := range m.cfg.Miners {
+		dctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		info, err := m.bitaxe[mn.Name].SystemInfo(dctx)
+		cancel()
+		if err != nil {
+			fmt.Fprintf(&b, "\n*%s* — 🔴 offline (%v)\n", mn.Name, err)
+			continue
+		}
+		fmt.Fprintf(&b, "\n*%s* — 🟢 online · %s · AxeOS %s\n", mn.Name, info.ASICModel, info.AxeOSVersion)
+		fmt.Fprintf(&b, "   hashrate %s (1h %s / exp %s) · ASIC %.0f°C · uptime %s\n",
+			format.Hashrate(info.HashRate), format.Hashrate(info.HashRate1h),
+			format.Hashrate(info.ExpectedHashrate), info.Temp, format.Uptime(info.UptimeSeconds))
+		fmt.Fprintf(&b, "   best ever %s · shares %d acc / %d rej\n",
+			format.Diff(info.BestDiff), info.SharesAccepted, info.SharesRejected)
+
+		if mn.Pool.Type == "ckpool" && mn.Pool.Address != "" {
+			pctx, pcancel := context.WithTimeout(ctx, 20*time.Second)
+			stats, perr := m.ckpool.User(pctx, mn.Pool.Address)
+			pcancel()
+			if perr == nil && stats.LastShare > 0 {
+				age := now.Sub(time.Unix(stats.LastShare, 0)).Round(time.Second)
+				fmt.Fprintf(&b, "   pool: last share %s ago · %d worker(s)\n", age, stats.Workers)
+			}
+		}
+	}
+
+	sctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	if err := m.notifier.SendText(sctx, b.String()); err != nil {
+		log.Printf("heartbeat: %v", err)
 	}
 }
 

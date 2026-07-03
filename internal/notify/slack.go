@@ -12,7 +12,8 @@ import (
 	"github.com/perlsaiyan/ns-mining/internal/alert"
 )
 
-// Slack posts messages to a channel with a bot token (xoxb-...).
+// Slack posts messages to a channel with a bot token (xoxb-...). Name and
+// avatar are taken from the Slack app's own configuration.
 type Slack struct {
 	token   string
 	channel string
