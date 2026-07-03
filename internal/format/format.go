@@ -3,8 +3,26 @@ package format
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
+
+// Gauge renders value within [min,max] as a width-character bar of ▓ (filled)
+// and ░ (empty). Values outside the range clamp to empty/full.
+func Gauge(value, min, max float64, width int) string {
+	if max <= min || width <= 0 {
+		return ""
+	}
+	frac := (value - min) / (max - min)
+	switch {
+	case frac < 0:
+		frac = 0
+	case frac > 1:
+		frac = 1
+	}
+	filled := int(frac*float64(width) + 0.5)
+	return strings.Repeat("▓", filled) + strings.Repeat("░", width-filled)
+}
 
 // Hashrate formats a GH/s value (AxeOS reports hashRate in GH/s).
 func Hashrate(gh float64) string {
