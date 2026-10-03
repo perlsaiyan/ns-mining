@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `ns-mining` is a single-binary Go service that monitors one or more Bitaxe miners
 and posts status changes to Slack. It polls two independent sources and reconciles
 them into edge-triggered alerts. Module path: `github.com/perlsaiyan/ns-mining`
-(Go 1.25, only dependency is `gopkg.in/yaml.v3`).
+(Go 1.27, only dependency is `gopkg.in/yaml.v3`).
 
 ## Commands
 
@@ -83,7 +83,7 @@ so time-dependent rules (work-stoppage duration, pool silence) are testable.
 Runs under systemd. `deploy/ns-mining.service` is the hardened **system-wide**
 template (`DynamicUser=yes`, `StateDirectory=ns-mining`, reads the token from an
 `EnvironmentFile`). In practice this repo is deployed as a **`systemctl --user`**
-service; see README for both paths. The device is at `http://192.168.88.152`.
+service; see README for both paths. The device is at `http://192.168.88.47`.
 
 ## Deferred / out of scope
 

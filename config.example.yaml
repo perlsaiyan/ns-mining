@@ -12,7 +12,7 @@ slack:
 
 miners:
   - name: bitaxe1
-    url: http://192.168.88.152
+    url: http://192.168.88.47
     pool:
       type: ckpool
       address: bc1q52c2qzn7363nn6esg8wvcur3leqszjz9ete5cc

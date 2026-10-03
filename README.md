@@ -49,7 +49,7 @@ slack:
   channel: C0BEQ56HM0B          # channel ID or #name
 miners:
   - name: bitaxe1
-    url: http://192.168.88.152
+    url: http://192.168.88.47
     pool: { type: ckpool, address: bc1q...your-address }
 thresholds:
   temp_warn_c: 68
